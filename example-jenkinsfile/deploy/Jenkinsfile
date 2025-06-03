@@ -1,0 +1,78 @@
+@Library("shared-lib@master") _
+
+
+// Which branches to trigger the pipeline upon Bitbucket webhook
+def dockerArtifactFilter = "master.*"
+
+
+def deployEnvs = [ 
+    live: [
+        git: [
+            selectedBranch: "master",   // TODO: update this
+            gitURL: "https://bitbucket.org/atrosbt/yamls.git",                 // TODO: update this
+            credentialsId: "jenkins-bitbucket-cloud-ro-id",
+        ],
+        deploymentsFolderName: "argocd/a-cluster-set/a-emikro/portal/portal-document-report-api",
+        chartYamlFileName: "Chart.yaml",    // Under the ${deploymentsFolderName} folder    // TODO: update this
+        valuesYamlFileName: "values.yaml",  // Under the ${deploymentsFolderName} folder    // TODO: update this
+        deployedClusterName: "a-emikro",         // Cluster name in the helm-base-common/clusters-and-versions file (overides 'helmBaseRepoChartFolder')
+        helmBaseRepoChartFolder: false,             // Chart folder in helm-base repo (overridden by 'deployedClusterName')
+    ]
+
+]
+
+def pipelineVariables = [
+    artifactParamInput: "Deployment Artifact",
+    envParamInput: "Deployment Environment",
+    imageName: "atrosdc/portal-document-reports-api",      // TODO: update this
+    envToDeploy: null,
+]
+
+def paramList = []
+paramList.add(imageTag(name: pipelineVariables.artifactParamInput, 
+                description: 'List of all artifacts on the portal-document-reports-api project', // TODO: update this
+                image: pipelineVariables.imageName, filter: dockerArtifactFilter,
+                registry: 'https://registry-1.docker.io', credentialId: 'dockerhub-secret', tagOrder: 'NATURAL'))
+paramList.add(choice(name: pipelineVariables.envParamInput, 
+                    choices: deployEnvs.keySet() as List, 
+                    description: "Environment to deploy"))
+properties([
+    parameters(paramList),
+    disableConcurrentBuilds(),
+])
+
+
+node("linux")
+{
+    try {
+        stage("Preperation") {
+            if (!params.get(pipelineVariables.artifactParamInput)) {
+                // if not any artifact is given as parameter
+                currentBuild.displayName = 'Parameter loading'
+                currentBuild.description = 'Please restart pipeline'
+                currentBuild.result = 'ABORTED'
+                error("Stopping build, there is no parameter selected")
+            } else {
+                echo "Given artifact: ${params[pipelineVariables.artifactParamInput]}"
+                echo "Given environment: ${params[pipelineVariables.envParamInput]}"
+                envToDeploy = deployEnvs[params[pipelineVariables.envParamInput]]
+                artifact_param_input = params[pipelineVariables.artifactParamInput]
+            }
+             
+            // call Shared Library function HelmPackageAndUploadv2
+            HelmPackageAndUploadv2(
+                chart_version: "1.1.${BUILD_NUMBER}",
+                docker_image_tag: artifact_param_input,     // e.g. repository/image:tag
+                deployment_env: envToDeploy
+            )
+        }
+
+        currentBuild.result = 'SUCCESS'
+        bitbucketStatusNotify(buildState: 'SUCCESSFUL')
+    } catch (err) {
+        echo "Pipeline Failed: ${err}"
+        currentBuild.result = 'FAILED'
+        bitbucketStatusNotify(buildState: 'FAILED')
+    }
+    
+}

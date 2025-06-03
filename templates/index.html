@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Jenkins Job Oluşturucu</title>
+    <title>Jenkins Proje Oluşturucu</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -28,7 +28,7 @@
             margin-bottom: 5px;
             color: #666;
         }
-        input[type="text"] {
+        input[type="text"], select {
             width: 100%;
             padding: 8px;
             border: 1px solid #ddd;
@@ -61,31 +61,123 @@
             background-color: #f2dede;
             color: #a94442;
         }
+        .info-box {
+            background-color: #d9edf7;
+            color: #31708f;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .required::after {
+            content: " *";
+            color: red;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Jenkins Job Oluşturucu</h1>
-        <div class="form-group">
-            <label for="job_name">Job Adı:</label>
-            <input type="text" id="job_name" name="job_name" required>
+        <h1>Jenkins Proje Oluşturucu</h1>
+        <div class="info-box">
+            Bu araç, Jenkins'te yeni bir proje klasör yapısı ve içinde build ve deploy pipeline job'ları oluşturur.
         </div>
-        <button onclick="createJob()">Job Oluştur</button>
+        <div class="form-group">
+            <label for="project_name" class="required">Proje Adı:</label>
+            <input type="text" id="project_name" name="project_name" required>
+        </div>
+        <div class="form-group">
+            <label for="use_argocd" class="required">ArgoCD Kullanılsın mı?</label>
+            <select id="use_argocd" name="use_argocd" required>
+                <option value="">Seçiniz...</option>
+                <option value="evet">Evet</option>
+                <option value="hayır">Hayır</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="domain" class="required">Domain:</label>
+            <select id="domain" name="domain" required>
+                <option value="">Seçiniz...</option>
+                <option value="E-Mikro">E-Mikro</option>
+                <option value="Mikro">Mikro</option>
+                <option value="Mikrogrup">Mikrogrup</option>
+                <option value="Parasut">Parasut</option>
+                <option value="Shopside">Shopside</option>
+                <option value="Zirve">Zirve</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="system_name">System Name (Opsiyonel):</label>
+            <input type="text" id="system_name" name="system_name">
+        </div>
+        <div class="form-group">
+            <label for="filter_branch" class="required">Filter Branch:</label>
+            <input type="text" id="filter_branch" name="filter_branch" required>
+        </div>
+        <div class="form-group">
+            <label for="allowed_branches" class="required">Allowed Branches:</label>
+            <input type="text" id="allowed_branches" name="allowed_branches" required>
+        </div>
+        <div class="form-group">
+            <label for="image_name" class="required">Image Name:</label>
+            <input type="text" id="image_name" name="image_name" required>
+        </div>
+        <div class="form-group">
+            <label for="dockerfile_path" class="required">Dockerfile Path:</label>
+            <input type="text" id="dockerfile_path" name="dockerfile_path" required>
+        </div>
+        <div class="form-group">
+            <label for="git_url" class="required">Git URL:</label>
+            <input type="text" id="git_url" name="git_url" required>
+        </div>
+        <div class="form-group">
+            <label for="artifact_name" class="required">Artifact Name:</label>
+            <input type="text" id="artifact_name" name="artifact_name" required>
+        </div>
+        <button onclick="createProject()">Proje Oluştur</button>
         <div id="status"></div>
     </div>
 
     <script>
-        function createJob() {
-            const jobName = document.getElementById('job_name').value.trim();
+        function createProject() {
+            const projectName = document.getElementById('project_name').value.trim();
+            const useArgocd = document.getElementById('use_argocd').value;
+            const domain = document.getElementById('domain').value;
+            const systemName = document.getElementById('system_name').value.trim();
+            const filterBranch = document.getElementById('filter_branch').value.trim();
+            const allowedBranches = document.getElementById('allowed_branches').value.trim();
+            const imageName = document.getElementById('image_name').value.trim();
+            const dockerfilePath = document.getElementById('dockerfile_path').value.trim();
+            const gitUrl = document.getElementById('git_url').value.trim();
+            const artifactName = document.getElementById('artifact_name').value.trim();
             const statusDiv = document.getElementById('status');
             
-            if (!jobName) {
-                showStatus('Lütfen bir job adı girin!', false);
+            if (!projectName) {
+                showStatus('Lütfen bir proje adı girin!', false);
+                return;
+            }
+            if (!useArgocd) {
+                showStatus('Lütfen ArgoCD seçeneğini belirleyin!', false);
+                return;
+            }
+            if (!domain) {
+                showStatus('Lütfen bir domain seçin!', false);
+                return;
+            }
+            if (!filterBranch || !allowedBranches || !imageName || !dockerfilePath || !gitUrl || !artifactName) {
+                showStatus('Lütfen tüm build parametrelerini doldurun!', false);
                 return;
             }
             
             const formData = new FormData();
-            formData.append('job_name', jobName);
+            formData.append('project_name', projectName);
+            formData.append('use_argocd', useArgocd);
+            formData.append('domain', domain);
+            formData.append('system_name', systemName);
+            formData.append('filter_branch', filterBranch);
+            formData.append('allowed_branches', allowedBranches);
+            formData.append('image_name', imageName);
+            formData.append('dockerfile_path', dockerfilePath);
+            formData.append('git_url', gitUrl);
+            formData.append('artifact_name', artifactName);
             
             fetch('/create_job', {
                 method: 'POST',

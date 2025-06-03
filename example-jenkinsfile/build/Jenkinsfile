@@ -1,0 +1,201 @@
+// Which branches to trigger the pipeline upon Bitbucket webhook
+def webhookGitBranchFilter = "master|develop|test"
+
+// Which branches to allow the pipeline to run
+def allowedBranches = ["master","test","development"]
+
+// allowAutoDeploymentForBranches: Which branches will be automatically deployed after the build step
+def allowAutoDeploymentForBranches = []
+
+
+
+def runSonarScanPipelineConfig = [
+    non_merged_pull_request: true,  // run sonar scan for non-merged pull requests
+    merged_pull_request: true,     // run sonar scan for merged pull requests
+    manual_trigger: true,           // run sonar scan for manually triggered builds
+]
+
+
+def _doRunSonarQube = false  // internal variable, do not change
+
+
+def pipelineVariables = [
+    envParamInput: "Deployment Environment",
+    imageName: "atrosdc/portal-document-reports-api",  // TODO: update this
+    artifactTAG: "",
+    envToDeploy: null,
+    dockerCredentialsId: "dockerhub-secret",
+    dockerfile: "./PortalDocumentsReport.Api/Dockerfile",     // TODO: update this
+    dockerBuildArg: "",  // optional
+]
+
+repo = [
+    selectedBranch: "master",                 // TODO: update this
+    gitURL: "https://bitbucket.org/atrosbt/portal-documents-report.git",                         // TODO: update this
+    credentialsId: "jenkins-bitbucket-cloud-ro-id",
+    parameterProps: [
+        defaultValue: 'master',                         // TODO: update this
+        name: 'portal-document-reports-api Branch Selection',      // TODO: update this
+    ],
+    section: [
+        name: "portal-document-reports-api_Section",               // TODO: update this
+        header: "portal-document-reports-api Branch Parameters",   // TODO: update this
+        /* CSS Declerations for Parameter Group Headers */
+        sectionHeaderStyle: " position: relative;  font-weight: 900;  font: bold 24px/1 Roboto, sans-serif !important;  padding-bottom: 10px;",
+    ],
+    branchPrefix: "refs/heads/",
+    runInputPrefix: "Trigger Job Manualy for Selected Branch",
+    hubCreds: "dockerhub-secret",
+    artifactName: "atrosdc/portal-document-reports-api",           // TODO: update this
+    
+    // SONARQUBE SCAN CONFIG
+    sonarKey: "portal-document-reports-api-test",                              // TODO: update this
+    solutionName: "PortalDocumentsReport.sln",                        // TODO: update this
+    sonarScannerDockerImage: "ghcr.io/nosinovacao/dotnet-sonar:24.01.5",    // TODO: update this
+    deployJenkinsJobName: "portal-document-reports-api-deploy",  // TODO: update this
+]
+
+def paramList = []
+
+paramList.add([
+            $class: 'ParameterSeparatorDefinition',
+            name: repo.section.name,
+            sectionHeader: repo.section.header,
+            sectionHeaderStyle: repo.section.sectionHeaderStyle
+        ])
+
+paramList.add(listGitBranches(
+                    credentialsId: repo.credentialsId,
+                    defaultValue: repo.parameterProps.defaultValue,
+                    name: repo.parameterProps.name,
+                    quickFilterEnabled: true,
+                    remoteURL: repo.gitURL,
+                    selectedValue: 'DEFAULT',
+                    sortMode: 'NONE',
+                    tagFilter: '*',
+                    branchFilter: 'refs/heads/('+webhookGitBranchFilter+')',
+                    type: 'PT_BRANCH_TAG'))  
+paramList.add(booleanParam(defaultValue: false, 
+                    description: "", 
+                    name: repo.runInputPrefix))
+paramList.add([
+            $class: 'ParameterSeparatorDefinition',
+            name: "Webhook Parameter",
+            sectionHeader: repo.section.header,
+            separatorStyle: repo.section.separatorStyle,
+            sectionHeaderStyle: repo.section.sectionHeaderStyle
+        ]) 
+paramList.add(string(defaultValue: null,
+                description: "",
+                name: "serverPullRequest",
+                trim: false))
+
+properties([
+    parameters(paramList),
+    disableConcurrentBuilds(),
+    buildDiscarder(logRotator(numToKeepStr: '50', artifactNumToKeepStr: '5')),
+    pipelineTriggers([
+        [$class: "GenericTrigger",
+            genericVariables: [
+                [key: "serverPullRequest", value: '$.pullrequest'],
+                [key: "branch", value: '$.pullrequest.destination.branch.name'],
+            ],
+            causeString: "Triggered on webhook",
+            token: "portaldocumentreportapi-test",               // TODO: update this 
+            regexpFilterText: '$branch',
+            regexpFilterExpression: webhookGitBranchFilter
+        ]
+    ])
+])
+
+
+node("linux")
+{
+    try {
+        stage("Preperation") {
+            if (params.get("serverPullRequest")) {
+                pullrequestVariables = readJSON text: params.serverPullRequest
+                if (pullrequestVariables.state == "MERGED") {
+                    // triggered by a PR and it's MERGED
+                    repo.selectedBranch = pullrequestVariables.destination.branch.name
+                    _doRunSonarQube = runSonarScanPipelineConfig.merged_pull_request
+                    runDeploy = true
+                } else {
+                    // triggered by PR but it's NOT MERGED
+                    repo.selectedBranch = pullrequestVariables.source.branch.name
+                    _doRunSonarQube = runSonarScanPipelineConfig.non_merged_pull_request
+                    runDeploy = false
+                }
+            } else if (params[repo.runInputPrefix]) {
+                // Manually triggered build
+                repo.selectedBranch = params[repo.parameterProps.name].replaceAll(repo.branchPrefix, "")
+                repo.gitURL = repo.gitURL
+                _doRunSonarQube = runSonarScanPipelineConfig.manual_trigger
+                runDeploy = true
+            } else {
+                currentBuild.displayName = 'Parameter loading'
+                currentBuild.description = 'Please restart pipeline'
+                currentBuild.result = 'ABORTED'
+                error("Stopping build, there is no parameter supplied")
+            }
+        }
+
+        stage("Checkout") {
+            cleanWs()
+            checkout([$class: 'GitSCM', 
+                    branches: [[name: repo.selectedBranch]], 
+                    doGenerateSubmoduleConfigurations: false, 
+                    extensions: [], 
+                    userRemoteConfigs: [[credentialsId: repo.credentialsId, url: repo.gitURL]]
+                ])
+            bitbucketStatusNotify(buildState: 'INPROGRESS')
+        }
+        
+        // IMPORTANT: import the shared library after the checkout
+        // so bitbucketStatusNotify uses the correct repo
+        library "shared-lib@master"
+
+        stage("Build") {
+            if (_doRunSonarQube)
+            {
+                DotnetSonarQualityGate(repo)
+                // If we ran the SonarQube we want the Bitbucket Status to reflect the Sonarqube result, not the build result
+                currentBuild.result = 'SUCCESS'
+                bitbucketStatusNotify(buildState: 'SUCCESSFUL')
+            }
+
+            // Create the Docker Image if the branch is allowed
+            if (runDeploy == true && allowedBranches.contains(repo.selectedBranch))
+            {
+                DockerRegister(
+                    dockerfile: pipelineVariables.dockerfile,
+                    buildArg: pipelineVariables.dockerBuildArg,
+                    imageName: "${pipelineVariables.imageName}:${repo.selectedBranch}_$BUILD_NUMBER",
+                    credentialsId: pipelineVariables.dockerCredentialsId
+                )
+            }
+        }
+        stage("Deploy")
+        {
+            if (runDeploy && allowAutoDeploymentForBranches.contains(repo.selectedBranch))
+            {
+                def jobBuild = build job: repo.deployJenkinsJobName, parameters: [
+                    // ÖNEMLİ: 'Deployment Environment', `JenkinsfileDeploy -> deployEnvs` değişkenindeki değerler branch isimleriyle aynı olmalı. 
+                    string(name: 'Deployment Artifact', value: "${repo.selectedBranch}_$BUILD_NUMBER"),
+                    string(name: 'Deployment Environment', value: repo.selectedBranch)
+                ]
+            }
+        }
+
+        if (!_doRunSonarQube){
+            // send the bitbucket Status Notification if SonarQube is not run to reflect the build status
+            currentBuild.result = 'SUCCESS'
+            bitbucketStatusNotify(buildState: 'SUCCESSFUL')
+        }
+        
+    } catch (err) {
+        echo "Pipeline Failed: ${err}"
+        currentBuild.result = 'FAILED'
+        bitbucketStatusNotify(buildState: 'FAILED')
+    }
+}

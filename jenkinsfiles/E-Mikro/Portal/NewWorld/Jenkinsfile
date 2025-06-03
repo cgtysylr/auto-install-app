@@ -1,0 +1,51 @@
+
+// Which branches to trigger the pipeline upon Bitbucket webhook
+def webhookGitBranchFilter = "master"
+
+// Which branches to allow the pipeline to run
+def allowedBranches = ["master"]
+
+// allowAutoDeploymentForBranches: Which branches will be automatically deployed after the build step
+def allowAutoDeploymentForBranches = []
+
+
+def runSonarScanPipelineConfig = [
+    non_merged_pull_request: true,  // run sonar scan for non-merged pull requests
+    merged_pull_request: true,     // run sonar scan for merged pull requests
+    manual_trigger: true,           // run sonar scan for manually triggered builds
+]
+
+def _doRunSonarQube = false  // internal variable, do not change
+
+def pipelineVariables = [
+    envParamInput: "Deployment Environment",
+    imageName: "new-world",
+    artifactTAG: "",
+    envToDeploy: null,
+    dockerCredentialsId: "dockerhub-secret",
+    dockerfile: "./Dockerfile",
+    dockerBuildArg: "",  // optional
+]
+
+repo = [
+    selectedBranch: "master",                 // TODO: update this
+    gitURL: "https://github.com/cgtysylr/auto-install-app",
+    credentialsId: "jenkins-bitbucket-cloud-ro-id",
+    parameterProps: [
+        defaultValue: 'master',
+        name: 'new-world Branch Selection',
+    ],
+    section: [
+        name: "new-world_Section",
+        header: "new-world Branch Parameters",
+        sectionHeaderStyle: " position: relative;  font-weight: 900;  font: bold 24px/1 Roboto, sans-serif !important;  padding-bottom: 10px;",
+    ],
+    branchPrefix: "refs/heads/",
+    runInputPrefix: "Trigger Job Manualy for Selected Branch",
+    hubCreds: "dockerhub-secret",
+    artifactName: "new-world",
+    sonarKey: "new-world-test",
+    solutionName: "PortalDocumentsReport.sln",
+    sonarScannerDockerImage: "ghcr.io/nosinovacao/dotnet-sonar:24.01.5",
+    deployJenkinsJobName: "new-world-deploy",
+]
