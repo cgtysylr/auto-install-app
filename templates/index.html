@@ -1,82 +1,4 @@
-import requests
-from requests.auth import HTTPBasicAuth
-import getpass
-from flask import Flask, render_template, request, jsonify
-import os
-
-app = Flask(__name__)
-
-# Jenkins bilgileri
-JENKINS_URL = "https://jenkins-test.atros.com.tr"
-USERNAME = "cagatay.soyler"
-PASSWORD = getpass.getpass("Jenkins şifrenizi girin ({}): ".format(USERNAME))
-
-def create_jenkins_job(job_name):
-    try:
-        # Oturum başlat
-        session = requests.Session()
-        session.auth = HTTPBasicAuth(USERNAME, PASSWORD)
-        
-        # Crumb al
-        crumb_url = f"{JENKINS_URL}/crumbIssuer/api/json"
-        crumb_response = session.get(crumb_url)
-        if crumb_response.status_code != 200:
-            return False, f"Crumb alınamadı: {crumb_response.status_code}"
-        
-        crumb_data = crumb_response.json()
-        crumb_field = crumb_data["crumbRequestField"]
-        crumb_value = crumb_data["crumb"]
-        
-        # Job konfigürasyonu
-        job_config_xml = f"""<?xml version='1.1' encoding='UTF-8'?>
-<project>
-  <description>Python'dan oluşturulan iş</description>
-  <builders>
-    <hudson.tasks.Shell>
-      <command>echo Merhaba Jenkins</command>
-    </hudson.tasks.Shell>
-  </builders>
-</project>"""
-        
-        headers = {
-            "Content-Type": "application/xml",
-            crumb_field: crumb_value
-        }
-        
-        # Job oluştur
-        create_url = f"{JENKINS_URL}/createItem?name={job_name}"
-        response = session.post(create_url, data=job_config_xml, headers=headers)
-        
-        if response.status_code == 200:
-            return True, f"Job '{job_name}' başarıyla oluşturuldu!"
-        elif response.status_code == 400:
-            return False, "Bu isimde bir job zaten var!"
-        else:
-            return False, f"Hata: {response.status_code}\n{response.text}"
-            
-    except Exception as e:
-        return False, str(e)
-
-@app.route('/')
-def home():
-    return render_template('index.html')
-
-@app.route('/create_job', methods=['POST'])
-def create_job():
-    job_name = request.form.get('job_name', '').strip()
-    if not job_name:
-        return jsonify({'success': False, 'message': 'Lütfen bir job adı girin!'})
-    
-    success, message = create_jenkins_job(job_name)
-    return jsonify({'success': success, 'message': message})
-
-if __name__ == "__main__":
-    # templates klasörünü oluştur
-    os.makedirs('templates', exist_ok=True)
-    
-    # HTML template'i oluştur
-    with open('templates/index.html', 'w', encoding='utf-8') as f:
-        f.write("""<!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
     <title>Jenkins Job Oluşturucu</title>
@@ -186,6 +108,4 @@ if __name__ == "__main__":
         }
     </script>
 </body>
-</html>""")
-    
-    app.run(host='0.0.0.0', port=3000, debug=True)
+</html>
