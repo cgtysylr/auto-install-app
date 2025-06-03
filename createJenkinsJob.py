@@ -127,6 +127,40 @@ def create_pipeline_job(session, folder_path, job_name, crumb_field, crumb_value
     response = session.post(create_url, data=job_config, headers=headers)
     return response.status_code == 200
 
+def create_deploy_jenkinsfile(allowed_branches, environment, domain, git_url, image_name):
+    branches = [b.strip() for b in allowed_branches.split(',') if b.strip()]
+    allowed_branches_str = ', '.join([f'"{b}"' for b in branches])
+    docker_artifact_filter = '|'.join(branches)
+    if environment == "prod":
+        selected_branch = "master"
+        repo_url = "https://bitbucket.org/atrosbt/yamls.git"
+        deployed_cluster = domain.lower().replace(" ", "-")
+    else:
+        selected_branch = "deployments"
+        repo_url = git_url
+        deployed_cluster = "dev"  # Geliştirilebilir: test/staging için parametre alınabilir
+    return f'''
+def dockerArtifactFilter = "{docker_artifact_filter}"
+def allowedBranches = [{allowed_branches_str}]
+def environment = "{environment}"
+
+def deployEnvs = [
+    {branches[0]}: [
+        git: [
+            selectedBranch: "{selected_branch}",
+            gitURL: "{repo_url}",
+            credentialsId: "jenkins-bitbucket-cloud-ro-id",
+        ],
+        deploymentsFolderName: "argocd/{deployed_cluster}/{image_name}",
+        chartYamlFileName: "Chart.yaml",
+        valuesYamlFileName: "values.yaml",
+        deployedClusterName: "{deployed_cluster}",
+        helmBaseRepoChartFolder: false,
+    ]
+]
+// ... pipeline stages burada ...
+'''
+
 def create_jenkins_job(project_name, use_argocd, domain, system_name=None, git_url=None, script_base_path=None):
     try:
         session = requests.Session()
@@ -186,6 +220,7 @@ def create_job():
     dockerfile_path = request.form.get('dockerfile_path', '').strip()
     git_url = request.form.get('git_url', '').strip()
     artifact_name = request.form.get('artifact_name', '').strip()
+    environment = request.form.get('environment', '').strip()
     
     if not project_name:
         return jsonify({'success': False, 'message': 'Lütfen bir proje adı girin!'})
@@ -193,14 +228,14 @@ def create_job():
         return jsonify({'success': False, 'message': 'Lütfen ArgoCD seçeneğini belirleyin!'})
     if not domain:
         return jsonify({'success': False, 'message': 'Lütfen bir domain seçin!'})
-    if not filter_branch or not allowed_branches or not image_name or not dockerfile_path or not git_url or not artifact_name:
-        return jsonify({'success': False, 'message': 'Lütfen tüm build parametrelerini doldurun!'})
+    if not filter_branch or not allowed_branches or not image_name or not dockerfile_path or not git_url or not artifact_name or not environment:
+        return jsonify({'success': False, 'message': 'Lütfen tüm build ve deploy parametrelerini doldurun!'})
     
     # allowed_branches'ı diziye çevir
     allowed_branches_list = [f'"{b.strip()}"' for b in allowed_branches.split(',') if b.strip()]
     allowed_branches_str = ','.join(allowed_branches_list)
 
-    # Jenkinsfile içeriğini oluştur
+    # Build Jenkinsfile içeriğini oluştur
     jenkinsfile_content = JENKINSFILE_TEMPLATE.format(
         filter_branch=filter_branch,
         allowed_branches=allowed_branches_str,
@@ -209,16 +244,31 @@ def create_job():
         git_url=git_url,
         artifact_name=artifact_name
     )
-
-    # Jenkinsfile'ı workspace'te kaydet (örnek path)
-    jenkinsfile_path = f"jenkinsfiles/{domain}/{system_name}/{project_name}/Jenkinsfile"
-    os.makedirs(os.path.dirname(jenkinsfile_path), exist_ok=True)
-    with open(jenkinsfile_path, 'w', encoding='utf-8') as f:
+    build_jenkinsfile_path = f"jenkinsfiles/{domain}/{system_name}/{project_name}/build/Jenkinsfile"
+    os.makedirs(os.path.dirname(build_jenkinsfile_path), exist_ok=True)
+    with open(build_jenkinsfile_path, 'w', encoding='utf-8') as f:
         f.write(jenkinsfile_content)
 
-    success, message = create_jenkins_job(project_name, use_argocd, domain, system_name, git_url, jenkinsfile_path)
+    # Deploy Jenkinsfile içeriğini oluştur
+    deploy_jenkinsfile_content = create_deploy_jenkinsfile(
+        allowed_branches=allowed_branches,
+        environment=environment,
+        domain=domain,
+        git_url=git_url,
+        image_name=image_name
+    )
+    deploy_jenkinsfile_path = f"jenkinsfiles/{domain}/{system_name}/{project_name}/deploy/Jenkinsfile"
+    os.makedirs(os.path.dirname(deploy_jenkinsfile_path), exist_ok=True)
+    with open(deploy_jenkinsfile_path, 'w', encoding='utf-8') as f:
+        f.write(deploy_jenkinsfile_content)
+
+    success, message = create_jenkins_job(
+        project_name, use_argocd, domain, system_name, git_url,
+        script_base_path=f"jenkinsfiles/{domain}/{system_name}/{project_name}"
+    )
     if success:
-        message += f"<br>Jenkinsfile oluşturuldu: {jenkinsfile_path}"
+        message += f"<br>Build Jenkinsfile oluşturuldu: {build_jenkinsfile_path}"
+        message += f"<br>Deploy Jenkinsfile oluşturuldu: {deploy_jenkinsfile_path}"
     return jsonify({'success': success, 'message': message})
 
 if __name__ == "__main__":
@@ -361,6 +411,14 @@ if __name__ == "__main__":
             <label for="artifact_name" class="required">Artifact Name:</label>
             <input type="text" id="artifact_name" name="artifact_name" required>
         </div>
+        <div class="form-group">
+            <label for="environment" class="required">Ortam:</label>
+            <select id="environment" name="environment" required>
+                <option value="">Seçiniz...</option>
+                <option value="prod">Prod</option>
+                <option value="nonprod">Nonprod</option>
+            </select>
+        </div>
         <button onclick="createProject()">Proje Oluştur</button>
         <div id="status"></div>
     </div>
@@ -377,6 +435,7 @@ if __name__ == "__main__":
             const dockerfilePath = document.getElementById('dockerfile_path').value.trim();
             const gitUrl = document.getElementById('git_url').value.trim();
             const artifactName = document.getElementById('artifact_name').value.trim();
+            const environment = document.getElementById('environment').value.trim();
             const statusDiv = document.getElementById('status');
             
             if (!projectName) {
@@ -391,8 +450,8 @@ if __name__ == "__main__":
                 showStatus('Lütfen bir domain seçin!', false);
                 return;
             }
-            if (!filterBranch || !allowedBranches || !imageName || !dockerfilePath || !gitUrl || !artifactName) {
-                showStatus('Lütfen tüm build parametrelerini doldurun!', false);
+            if (!filterBranch || !allowedBranches || !imageName || !dockerfilePath || !gitUrl || !artifactName || !environment) {
+                showStatus('Lütfen tüm build ve deploy parametrelerini doldurun!', false);
                 return;
             }
             
@@ -407,6 +466,7 @@ if __name__ == "__main__":
             formData.append('dockerfile_path', dockerfilePath);
             formData.append('git_url', gitUrl);
             formData.append('artifact_name', artifactName);
+            formData.append('environment', environment);
             
             fetch('/create_job', {
                 method: 'POST',

@@ -6,7 +6,7 @@ def dockerArtifactFilter = "master.*"
 
 
 def deployEnvs = [ 
-    live: [
+    master: [
         git: [
             selectedBranch: "master",   // TODO: update this
             gitURL: "https://bitbucket.org/atrosbt/yamls.git",                 // TODO: update this

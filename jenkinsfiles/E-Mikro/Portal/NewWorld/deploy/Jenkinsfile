@@ -1,0 +1,20 @@
+
+def dockerArtifactFilter = "master"
+def allowedBranches = ["master"]
+def environment = "prod"
+
+def deployEnvs = [
+    master: [
+        git: [
+            selectedBranch: "master",
+            gitURL: "https://bitbucket.org/atrosbt/yamls.git",
+            credentialsId: "jenkins-bitbucket-cloud-ro-id",
+        ],
+        deploymentsFolderName: "argocd/e-mikro/new-world",
+        chartYamlFileName: "Chart.yaml",
+        valuesYamlFileName: "values.yaml",
+        deployedClusterName: "e-mikro",
+        helmBaseRepoChartFolder: false,
+    ]
+]
+// ... pipeline stages burada ...

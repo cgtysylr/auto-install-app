@@ -132,6 +132,14 @@
             <label for="artifact_name" class="required">Artifact Name:</label>
             <input type="text" id="artifact_name" name="artifact_name" required>
         </div>
+        <div class="form-group">
+            <label for="environment" class="required">Ortam:</label>
+            <select id="environment" name="environment" required>
+                <option value="">Seçiniz...</option>
+                <option value="prod">Prod</option>
+                <option value="nonprod">Nonprod</option>
+            </select>
+        </div>
         <button onclick="createProject()">Proje Oluştur</button>
         <div id="status"></div>
     </div>
@@ -148,6 +156,7 @@
             const dockerfilePath = document.getElementById('dockerfile_path').value.trim();
             const gitUrl = document.getElementById('git_url').value.trim();
             const artifactName = document.getElementById('artifact_name').value.trim();
+            const environment = document.getElementById('environment').value.trim();
             const statusDiv = document.getElementById('status');
             
             if (!projectName) {
@@ -162,8 +171,8 @@
                 showStatus('Lütfen bir domain seçin!', false);
                 return;
             }
-            if (!filterBranch || !allowedBranches || !imageName || !dockerfilePath || !gitUrl || !artifactName) {
-                showStatus('Lütfen tüm build parametrelerini doldurun!', false);
+            if (!filterBranch || !allowedBranches || !imageName || !dockerfilePath || !gitUrl || !artifactName || !environment) {
+                showStatus('Lütfen tüm build ve deploy parametrelerini doldurun!', false);
                 return;
             }
             
@@ -178,6 +187,7 @@
             formData.append('dockerfile_path', dockerfilePath);
             formData.append('git_url', gitUrl);
             formData.append('artifact_name', artifactName);
+            formData.append('environment', environment);
             
             fetch('/create_job', {
                 method: 'POST',
